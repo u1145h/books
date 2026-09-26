@@ -45,6 +45,10 @@ fun HomeScreen(
     val serverUrlState by viewModel.serverUrlState.collectAsStateWithLifecycle()
     val bodyColor by viewModel.bridge.bodyColor.collectAsStateWithLifecycle()
     val setupState by viewModel.setupState.collectAsStateWithLifecycle()
+    val downloadedBooks by viewModel.downloadedBooks.collectAsStateWithLifecycle(initialValue = emptyList())
+
+    val isManualOffline by viewModel.bridge.isManualOffline.collectAsStateWithLifecycle()
+    val showAppSettings by viewModel.bridge.showAppSettings.collectAsStateWithLifecycle()
 
     val context = LocalContext.current
     val activity = context as? Activity
@@ -73,6 +77,14 @@ fun HomeScreen(
     val currentUrl = (serverUrlState as? ServerUrlState.Configured)?.url ?: ""
 
     BackHandler {
+        if (showAppSettings) {
+            viewModel.bridge.setShowAppSettings(false)
+            return@BackHandler
+        }
+        if (isManualOffline) {
+            viewModel.bridge.setManualOffline(false)
+            return@BackHandler
+        }
         if (currentUrl.isBlank()) {
             activity?.finish()
             return@BackHandler
@@ -137,13 +149,37 @@ fun HomeScreen(
                         )
                     }
 
-                    if (isOffline) {
+                    if (isOffline || isManualOffline) {
                         OfflineScreen(
                             url = state.url,
+                            downloadedBooks = downloadedBooks,
                             onRetry = {
                                 isOffline = false
+                                viewModel.bridge.setManualOffline(false)
                                 webView?.reload()
                             },
+                            onOpenBook = { book ->
+                                val chapterId = book.chapterId
+                                if (chapterId != null && chapterId > 0) {
+                                    isOffline = false
+                                    viewModel.bridge.setManualOffline(false)
+                                    webView?.loadUrl("${state.url.trimEnd('/')}/reader/chapter/$chapterId")
+                                }
+                            },
+                        )
+                    }
+
+                    if (showAppSettings) {
+                        com.u1145h.kavitaandroid.ui.components.AppSettingsScreen(
+                            currentServerUrl = state.url,
+                            username = viewModel.bridge.getUsername(),
+                            setupState = setupState,
+                            downloadedBooks = downloadedBooks,
+                            onSaveServerUrl = viewModel::submitServerUrl,
+                            onDeleteBook = viewModel::deleteBook,
+                            onClearAllDownloads = viewModel::clearAllDownloads,
+                            onClose = { viewModel.bridge.setShowAppSettings(false) },
+                            modifier = Modifier.fillMaxSize(),
                         )
                     }
                 }

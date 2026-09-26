@@ -2,10 +2,14 @@ package com.u1145h.kavitaandroid.feature.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.u1145h.kavitaandroid.data.local.db.dao.BookDao
+import com.u1145h.kavitaandroid.data.local.db.entity.BookEntity
+import com.u1145h.kavitaandroid.data.local.files.BookFileManager
 import com.u1145h.kavitaandroid.data.remote.ServerHealthChecker
 import com.u1145h.kavitaandroid.data.repository.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -34,16 +38,25 @@ sealed interface ServerUrlState {
 }
 
 /**
- * Supplies the embedded web UI with its base URL and the native [KavitaBridge].
- * On first run (no saved server URL) drives the setup flow that verifies the
- * address before it is persisted.
+ * Supplies the embedded web UI with its base URL, native [KavitaBridge], and
+ * offline downloaded books stream.
  */
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     val bridge: KavitaBridge,
     private val settingsRepository: SettingsRepository,
     private val healthChecker: ServerHealthChecker,
+    private val bookFileManager: BookFileManager,
+    private val bookDao: BookDao,
 ) : ViewModel() {
+    val downloadedBooks: Flow<List<BookEntity>> = bookDao.observeAll().map { list ->
+        list.filter { book ->
+            val titleOk = book.title != "Books" && book.title != "Home (Kavita)" && book.title.isNotBlank()
+            val sizeOk = book.fileSizeBytes > 50000
+            titleOk && sizeOk
+        }
+    }
+
     val serverUrlState: StateFlow<ServerUrlState> = settingsRepository.serverUrl
         .map { url ->
             if (url.isBlank()) {
@@ -60,6 +73,25 @@ class HomeViewModel @Inject constructor(
 
     private val _setupState = MutableStateFlow<SetupState>(SetupState.Idle)
     val setupState: StateFlow<SetupState> = _setupState.asStateFlow()
+
+    fun deleteBook(book: BookEntity) {
+        viewModelScope.launch {
+            bookFileManager.deleteFile(book.filePath)
+            bookFileManager.deleteFile(book.coverPath)
+            bookDao.markDeleted(book.id)
+        }
+    }
+
+    fun clearAllDownloads() {
+        viewModelScope.launch {
+            val all = bookDao.getAll()
+            all.forEach { book ->
+                bookFileManager.deleteFile(book.filePath)
+                bookFileManager.deleteFile(book.coverPath)
+                bookDao.markDeleted(book.id)
+            }
+        }
+    }
 
     fun submitServerUrl(raw: String) {
         if (_setupState.value == SetupState.Checking) return
@@ -90,3 +122,4 @@ class HomeViewModel @Inject constructor(
         return parsed.toString().removeSuffix("/")
     }
 }
+

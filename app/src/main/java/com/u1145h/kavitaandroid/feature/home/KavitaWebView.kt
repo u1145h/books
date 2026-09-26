@@ -50,6 +50,20 @@ fun KavitaWebView(
                 onLoadingChanged(false)
                 view?.evaluateJavascript(KavitaJs.SESSION_SYNC, null)
                 view?.evaluateJavascript(KavitaJs.BODY_COLOR, null)
+                view?.evaluateJavascript(KavitaJs.OFFLINE_INJECT, null)
+                view?.evaluateJavascript(KavitaJs.SIDEBAR_INJECT, null)
+            }
+
+            override fun shouldInterceptRequest(
+                view: WebView?,
+                request: WebResourceRequest?,
+            ): WebResourceResponse? {
+                val reqUrl = request?.url
+                if (reqUrl != null) {
+                    val offlineResp = bridge.getOfflineResource(reqUrl)
+                    if (offlineResp != null) return offlineResp
+                }
+                return super.shouldInterceptRequest(view, request)
             }
 
             override fun onReceivedError(
@@ -121,6 +135,7 @@ fun KavitaWebView(
                     }
                 }
                 addJavascriptInterface(bridge, KavitaJs.OBJECT_NAME)
+                bridge.attachWebView(this)
                 CookieManager.getInstance().setAcceptCookie(true)
                 CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
                 webViewRef[0] = this
