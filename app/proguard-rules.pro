@@ -12,17 +12,23 @@
 -dontwarn okio.**
 
 # kotlinx-serialization
--keepattributes RuntimeVisibleAnnotations, RuntimeVisibleParameterAnnotations, AnnotationDefault
--keep,includedescriptorclasses class com.u1145h.kavitaandroid.**$$serializer { *; }
--keepclassmembers class com.u1145h.kavitaandroid.** {
+-keepattributes RuntimeVisibleAnnotations, RuntimeVisibleParameterAnnotations, AnnotationDefault, *Annotation*
+-dontnote kotlinx.serialization.SerializationKt
+-keepclassmembers class * {
+    @kotlinx.serialization.SerialName <fields>;
+}
+-keep,includedescriptorclasses class com.u1145h.books.data.remote.dto.** { *; }
+-keep,includedescriptorclasses class com.u1145h.books.domain.model.** { *; }
+-keep,includedescriptorclasses class com.u1145h.books.**$$serializer { *; }
+-keepclassmembers class com.u1145h.books.** {
     *** Companion;
 }
--keepclasseswithmembers class com.u1145h.kavitaandroid.** {
+-keepclasseswithmembers class com.u1145h.books.** {
     kotlinx.serialization.KSerializer serializer(...);
 }
 
 # WebView JS interface
--keepclassmembers class com.u1145h.kavitaandroid.feature.home.KavitaBridge {
+-keepclassmembers class com.u1145h.books.feature.home.KavitaBridge {
     public *;
 }
 

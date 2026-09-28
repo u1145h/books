@@ -16,7 +16,7 @@ val keystoreProperties = Properties().apply {
 }
 
 android {
-    namespace = "com.u1145h.kavitaandroid"
+    namespace = "com.u1145h.books"
     compileSdk {
         version = release(37) {
             minorApiLevel = 0
@@ -24,7 +24,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.u1145h.kavitaandroid"
+        applicationId = "com.u1145h.books"
         minSdk = 26
         targetSdk = 36
         versionCode = 4
@@ -155,11 +155,10 @@ dependencies {
     // Coil
     implementation(libs.coil.compose)
 
-    // Readers
-    implementation(libs.readium.shared)
-    implementation(libs.readium.streamer)
-    implementation(libs.readium.navigator)
-    implementation(libs.junrar)
+    // WorkManager + Hilt integration
+    implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.androidx.hilt.work)
+    ksp(libs.hilt.android.compiler)   // already listed but ksp needs it for hilt-work too
 
     coreLibraryDesugaring(libs.desugar.jdk.libs)
 
