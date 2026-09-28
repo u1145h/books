@@ -15,7 +15,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * App preferences: server URL, theming, developer options and sync bookkeeping.
+ * App preferences: Kavita and ABS server URLs, theming, reader and sync settings.
  */
 @Singleton
 class SettingsDataStore @Inject constructor(
@@ -24,6 +24,7 @@ class SettingsDataStore @Inject constructor(
     private val dataStore = context.settingsDataStore
 
     private val keyServerUrl = stringPreferencesKey("server_url")
+    private val keyAbsServerUrl = stringPreferencesKey("abs_server_url")
     private val keyThemeMode = stringPreferencesKey("theme_mode")
     private val keyDynamicColor = booleanPreferencesKey("dynamic_color")
     private val keyDeveloperMode = booleanPreferencesKey("developer_mode")
@@ -37,6 +38,7 @@ class SettingsDataStore @Inject constructor(
         .map { prefs ->
             AppSettings(
                 serverUrl = prefs[keyServerUrl] ?: "",
+                absServerUrl = prefs[keyAbsServerUrl] ?: "",
                 themeMode = prefs[keyThemeMode]
                     ?.let { runCatching { ThemeMode.valueOf(it) }.getOrNull() }
                     ?: ThemeMode.SYSTEM,
@@ -50,7 +52,11 @@ class SettingsDataStore @Inject constructor(
         }
 
     suspend fun setServerUrl(url: String) {
-        dataStore.edit { it[keyServerUrl] = url.trim() }
+        dataStore.edit { it[keyServerUrl] = url.trim().trimEnd('/') }
+    }
+
+    suspend fun setAbsServerUrl(url: String) {
+        dataStore.edit { it[keyAbsServerUrl] = url.trim().trimEnd('/') }
     }
 
     suspend fun setThemeMode(mode: ThemeMode) {
@@ -84,6 +90,7 @@ class SettingsDataStore @Inject constructor(
 
 data class AppSettings(
     val serverUrl: String = "",
+    val absServerUrl: String = "",
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val dynamicColor: Boolean = true,
     val developerMode: Boolean = false,

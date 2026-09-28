@@ -7,6 +7,8 @@ import com.u1145h.books.data.local.db.dao.BookDao
 import com.u1145h.books.data.local.db.dao.BookmarkDao
 import com.u1145h.books.data.local.db.dao.DownloadQueueDao
 import com.u1145h.books.data.local.db.dao.ReadingSessionDao
+import com.u1145h.books.data.repository.AudiobookshelfRepository
+import com.u1145h.books.data.repository.AudiobookshelfRepositoryImpl
 import com.u1145h.books.data.repository.BookRepository
 import com.u1145h.books.data.repository.BookRepositoryImpl
 import com.u1145h.books.data.repository.KavitaRepository
@@ -55,4 +57,7 @@ abstract class RepositoryModule {
 
     @Binds @Singleton
     abstract fun bindSearchRepository(impl: SearchRepositoryImpl): SearchRepository
+
+    @Binds @Singleton
+    abstract fun bindAudiobookshelfRepository(impl: AudiobookshelfRepositoryImpl): AudiobookshelfRepository
 }

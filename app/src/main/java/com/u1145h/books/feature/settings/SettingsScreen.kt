@@ -64,10 +64,10 @@ fun SettingsScreen(
                 .padding(padding)
                 .verticalScroll(rememberScrollState()),
         ) {
-            // ── Account ───────────────────────────────────────────────────────
-            SectionLabel("Account")
-            InfoRow("Username", viewModel.username)
-            InfoRow("Server", viewModel.serverUrl.ifBlank { "Not configured" })
+            // Kavita Server Account
+            SectionLabel("Kavita Server (eBooks)")
+            InfoRow("Username", viewModel.username.ifBlank { "Not connected" })
+            InfoRow("Server URL", viewModel.serverUrl.ifBlank { "Not configured" })
 
             val lastSync = settings.lastSyncAtUtc
             ClickableRow(
@@ -80,10 +80,18 @@ fun SettingsScreen(
             Spacer(Modifier.height(8.dp))
             HorizontalDivider()
 
-            // ── Appearance ────────────────────────────────────────────────────
+            // Audiobookshelf Server Account
+            SectionLabel("Audiobookshelf Server (Audiobooks)")
+            InfoRow("Status", if (viewModel.isAbsLoggedIn) "Connected" else "Not connected")
+            InfoRow("Username", viewModel.absUsername.ifBlank { "None" })
+            InfoRow("Server URL", viewModel.absServerUrl.ifBlank { "Not configured" })
+
+            Spacer(Modifier.height(8.dp))
+            HorizontalDivider()
+
+            // Appearance
             SectionLabel("Appearance")
 
-            // Theme mode: cycle SYSTEM → LIGHT → DARK
             val nextTheme = when (settings.themeMode) {
                 ThemeMode.SYSTEM -> ThemeMode.LIGHT
                 ThemeMode.LIGHT -> ThemeMode.DARK
@@ -110,7 +118,7 @@ fun SettingsScreen(
             Spacer(Modifier.height(8.dp))
             HorizontalDivider()
 
-            // ── Reader defaults ────────────────────────────────────────────────
+            // Reader defaults
             SectionLabel("Reader defaults")
 
             SwitchRow(
@@ -130,7 +138,7 @@ fun SettingsScreen(
             Spacer(Modifier.height(8.dp))
             HorizontalDivider()
 
-            // ── Storage & Offline ─────────────────────────────────────────────
+            // Storage & Offline
             SectionLabel("Storage & Offline")
             val storageStats by viewModel.storageStats.collectAsStateWithLifecycle()
             InfoRow("Downloaded items", "${storageStats.bookCount} items")
@@ -152,18 +160,17 @@ private fun formatBytes(bytes: Long): String {
     if (bytes <= 0) return "0 B"
     val units = arrayOf("B", "KB", "MB", "GB", "TB")
     val digitGroups = (Math.log10(bytes.toDouble()) / Math.log10(1024.0)).toInt()
-    val value = bytes / Math.pow(1024.0, digitGroups.toDouble())
-    return String.format(Locale.getDefault(), "%.1f %s", value, units[digitGroups])
+    return String.format(Locale.getDefault(), "%.1f %s", bytes / Math.pow(1024.0, digitGroups.toDouble()), units[digitGroups])
 }
 
 @Composable
-private fun SectionLabel(text: String) {
+private fun SectionLabel(label: String) {
     Text(
-        text = text.uppercase(),
-        style = MaterialTheme.typography.labelSmall,
+        text = label,
+        style = MaterialTheme.typography.labelLarge,
         color = MaterialTheme.colorScheme.primary,
         fontWeight = FontWeight.Bold,
-        modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 4.dp),
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp),
     )
 }
 
@@ -175,14 +182,8 @@ private fun InfoRow(label: String, value: String) {
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(Modifier.weight(1f)) {
-            Text(label, style = MaterialTheme.typography.bodyMedium)
-        }
-        Text(
-            value,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+        Text(value, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -192,17 +193,11 @@ private fun ClickableRow(label: String, value: String, onClick: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(Modifier.weight(1f)) {
-            Text(label, style = MaterialTheme.typography.bodyMedium)
-        }
-        Text(
-            value,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.primary,
-        )
+        Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+        Text(value, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
     }
 }
 
@@ -216,17 +211,14 @@ private fun SwitchRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(Modifier.weight(1f)) {
-            Text(label, style = MaterialTheme.typography.bodyMedium)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyLarge)
             if (subtitle != null) {
-                Text(
-                    subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         Switch(checked = checked, onCheckedChange = onCheckedChange)

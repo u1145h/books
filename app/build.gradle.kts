@@ -154,6 +154,11 @@ dependencies {
 
     // Coil
     implementation(libs.coil.compose)
+    // Media3 (Audiobookshelf playback)
+    implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.session)
+    implementation(libs.androidx.media3.ui)
+
 
     // WorkManager + Hilt integration
     implementation(libs.androidx.work.runtime.ktx)

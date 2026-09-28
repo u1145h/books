@@ -7,6 +7,7 @@ import com.u1145h.books.data.local.datastore.AppSettings
 import com.u1145h.books.domain.model.ThemeMode
 import com.u1145h.books.data.local.db.dao.StorageStats
 import com.u1145h.books.data.remote.auth.SessionManager
+import com.u1145h.books.data.repository.AudiobookshelfRepository
 import com.u1145h.books.data.repository.BookRepository
 import com.u1145h.books.data.repository.SettingsRepository
 import com.u1145h.books.work.ProgressSyncWorker
@@ -23,6 +24,7 @@ class SettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val sessionManager: SessionManager,
     private val bookRepository: BookRepository,
+    private val absRepository: AudiobookshelfRepository,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -34,6 +36,10 @@ class SettingsViewModel @Inject constructor(
 
     val serverUrl: String get() = settingsRepository.currentServerUrl
     val username: String get() = sessionManager.session.value.username ?: ""
+
+    val absServerUrl: String get() = settingsRepository.currentAbsServerUrl
+    val absUsername: String get() = sessionManager.absUsername ?: ""
+    val isAbsLoggedIn: Boolean get() = sessionManager.isAbsLoggedIn.value
 
     fun syncNow() {
         viewModelScope.launch {

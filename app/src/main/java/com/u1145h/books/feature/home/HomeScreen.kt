@@ -22,16 +22,17 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
-import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.CollectionsBookmark
 import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.ui.platform.LocalContext
-import coil.request.ImageRequest
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -39,6 +40,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -50,25 +52,26 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
-import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.Button
+import coil.request.ImageRequest
+import com.u1145h.books.domain.model.ServerSource
+import com.u1145h.books.domain.model.UnifiedLibrary
+import com.u1145h.books.domain.model.UnifiedMediaItem
+import com.u1145h.books.domain.model.UnifiedMediaType
+import com.u1145h.books.feature.audio.AudioMiniPlayer
 import com.u1145h.books.ui.components.EmptyState
-import com.u1145h.books.domain.model.Library
-import com.u1145h.books.domain.model.Series
-
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
-    onLibraryClick: (Int, String) -> Unit,
     onSeriesClick: (Int) -> Unit,
+    onLibraryClick: (Int, String) -> Unit,
     onSearchClick: () -> Unit,
     onSettingsClick: () -> Unit,
     onLogout: () -> Unit,
@@ -86,9 +89,14 @@ fun HomeScreen(
                             fontWeight = FontWeight.Bold,
                             style = MaterialTheme.typography.titleLarge,
                         )
-                        if (state.username.isNotBlank()) {
+                        val connectedServers = buildList {
+                            if (state.isKavitaConnected) add("Kavita")
+                            if (state.isAbsConnected) add("Audiobookshelf")
+                        }.joinToString(" • ")
+
+                        if (connectedServers.isNotBlank()) {
                             Text(
-                                state.username,
+                                connectedServers,
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -109,36 +117,30 @@ fun HomeScreen(
                         viewModel.logout()
                         onLogout()
                     }) {
-                        Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "Logout")
+                        Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "Log out")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
+                    containerColor = MaterialTheme.colorScheme.surface,
                 ),
             )
         },
+        bottomBar = {
+            AudioMiniPlayer(
+                playerManager = viewModel.playerManager,
+                onClick = {},
+            )
+        }
     ) { padding ->
         if (state.isLoading) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                contentAlignment = Alignment.Center,
+            ) {
                 CircularProgressIndicator()
             }
-            return@Scaffold
-        }
-
-        if (state.error != null) {
-            EmptyState(
-                icon = Icons.Default.Warning,
-                title = "Error connecting to server",
-                subtitle = state.error,
-                modifier = Modifier.padding(padding),
-                action = {
-                    Button(onClick = { viewModel.load() }) {
-                        Icon(Icons.Default.Refresh, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Retry")
-                    }
-                },
-            )
             return@Scaffold
         }
 
@@ -150,8 +152,8 @@ fun HomeScreen(
         if (isEmpty) {
             EmptyState(
                 icon = Icons.Default.GridView,
-                title = "No libraries or series",
-                subtitle = "Connected to server, but no library content was found.",
+                title = "No media content found",
+                subtitle = "Connected to server, but no books or audiobooks were found.",
                 modifier = Modifier.padding(padding),
                 action = {
                     Button(onClick = { viewModel.load() }) {
@@ -170,7 +172,7 @@ fun HomeScreen(
                 .padding(padding),
             contentPadding = PaddingValues(bottom = 32.dp),
         ) {
-            // ── Libraries ────────────────────────────────────────────────────
+            // — Libraries (Kavita & Audiobookshelf) —
             if (state.libraries.isNotEmpty()) {
                 item {
                     SectionHeader("Libraries")
@@ -178,30 +180,39 @@ fun HomeScreen(
                         contentPadding = PaddingValues(horizontal = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        items(state.libraries) { lib ->
-                            LibraryCard(
+                        items(state.libraries, key = { it.id }) { lib ->
+                            UnifiedLibraryCard(
                                 library = lib,
-                                coverUrl = viewModel.coverUrlBuilder.library(lib.id),
-                                onClick = { onLibraryClick(lib.id, lib.name) },
+                                onClick = {
+                                    if (lib.source == ServerSource.Kavita) {
+                                        val seriesIdInt = lib.id.substringAfter("kavita:").toIntOrNull() ?: 0
+                                        onLibraryClick(seriesIdInt, lib.name)
+                                    }
+                                },
                             )
                         }
                     }
                 }
             }
 
-            // ── On Deck ──────────────────────────────────────────────────────
+            // — Continue Reading & Listening (On Deck) —
             if (state.onDeck.isNotEmpty()) {
                 item {
-                    SectionHeader("On Deck")
+                    SectionHeader("Continue Reading & Listening")
                     LazyRow(
                         contentPadding = PaddingValues(horizontal = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        items(state.onDeck) { series ->
-                            SeriesCard(
-                                series = series,
-                                coverUrl = viewModel.coverUrlBuilder.series(series.id),
-                                onClick = { onSeriesClick(series.id) },
+                        items(state.onDeck, key = { it.id }) { item ->
+                            UnifiedMediaCard(
+                                item = item,
+                                onClick = {
+                                    if (item.kavitaSeriesId != null) {
+                                        onSeriesClick(item.kavitaSeriesId)
+                                    } else if (item.absItemId != null) {
+                                        viewModel.playAudiobook(item)
+                                    }
+                                },
                                 showProgress = true,
                             )
                         }
@@ -209,27 +220,7 @@ fun HomeScreen(
                 }
             }
 
-            // ── In Progress ───────────────────────────────────────────────────
-            if (state.inProgress.isNotEmpty()) {
-                item {
-                    SectionHeader("In Progress")
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        items(state.inProgress) { series ->
-                            SeriesCard(
-                                series = series,
-                                coverUrl = viewModel.coverUrlBuilder.series(series.id),
-                                onClick = { onSeriesClick(series.id) },
-                                showProgress = true,
-                            )
-                        }
-                    }
-                }
-            }
-
-            // ── Recently Added ────────────────────────────────────────────────
+            // — Recently Added —
             if (state.recentlyAdded.isNotEmpty()) {
                 item {
                     SectionHeader("Recently Added")
@@ -237,11 +228,39 @@ fun HomeScreen(
                         contentPadding = PaddingValues(horizontal = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        items(state.recentlyAdded) { series ->
-                            SeriesCard(
-                                series = series,
-                                coverUrl = viewModel.coverUrlBuilder.series(series.id),
-                                onClick = { onSeriesClick(series.id) },
+                        items(state.recentlyAdded, key = { it.id }) { item ->
+                            UnifiedMediaCard(
+                                item = item,
+                                onClick = {
+                                    if (item.kavitaSeriesId != null) {
+                                        onSeriesClick(item.kavitaSeriesId)
+                                    } else if (item.absItemId != null) {
+                                        viewModel.playAudiobook(item)
+                                    }
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+
+            // — In Progress Manga & Comics —
+            if (state.inProgress.isNotEmpty()) {
+                item {
+                    SectionHeader("In Progress")
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        items(state.inProgress, key = { it.id }) { item ->
+                            UnifiedMediaCard(
+                                item = item,
+                                onClick = {
+                                    if (item.kavitaSeriesId != null) {
+                                        onSeriesClick(item.kavitaSeriesId)
+                                    }
+                                },
+                                showProgress = true,
                             )
                         }
                     }
@@ -262,9 +281,8 @@ private fun SectionHeader(title: String) {
 }
 
 @Composable
-fun LibraryCard(
-    library: Library,
-    coverUrl: String,
+fun UnifiedLibraryCard(
+    library: UnifiedLibrary,
     onClick: () -> Unit,
 ) {
     Column(
@@ -280,24 +298,25 @@ fun LibraryCard(
                 .background(MaterialTheme.colorScheme.surfaceVariant),
             contentAlignment = Alignment.Center,
         ) {
-            val defaultIcon = when (library.type) {
-                com.u1145h.books.domain.model.LibraryType.Book -> Icons.AutoMirrored.Filled.MenuBook
-                com.u1145h.books.domain.model.LibraryType.Comic -> Icons.Default.AutoStories
-                com.u1145h.books.domain.model.LibraryType.Manga -> Icons.Default.CollectionsBookmark
-                else -> Icons.Default.Folder
+            val icon = when (library.mediaType) {
+                UnifiedMediaType.Book -> Icons.AutoMirrored.Filled.MenuBook
+                UnifiedMediaType.Comic -> Icons.Default.AutoStories
+                UnifiedMediaType.Manga -> Icons.Default.CollectionsBookmark
+                UnifiedMediaType.Audiobook -> Icons.Default.Headphones
+                UnifiedMediaType.Podcast -> Icons.Default.Headphones
             }
 
             Icon(
-                imageVector = defaultIcon,
+                imageVector = icon,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
+                tint = if (library.source == ServerSource.Audiobookshelf) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(36.dp),
             )
 
-            if (coverUrl.isNotBlank()) {
+            if (!library.coverUrl.isNullOrBlank()) {
                 AsyncImage(
                     model = ImageRequest.Builder(LocalContext.current)
-                        .data(coverUrl)
+                        .data(library.coverUrl)
                         .crossfade(true)
                         .build(),
                     contentDescription = library.name,
@@ -306,25 +325,155 @@ fun LibraryCard(
                 )
             }
         }
+
         Spacer(Modifier.height(8.dp))
+
         Text(
             text = library.name,
             style = MaterialTheme.typography.labelMedium,
-            maxLines = 2,
+            maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = 4.dp),
         )
+
+        Surface(
+            color = if (library.source == ServerSource.Audiobookshelf) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.primaryContainer,
+            shape = RoundedCornerShape(4.dp),
+            modifier = Modifier.padding(top = 2.dp),
+        ) {
+            Text(
+                text = if (library.source == ServerSource.Audiobookshelf) "Audiobook" else "Kavita",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (library.source == ServerSource.Audiobookshelf) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+            )
+        }
+    }
+}
+
+@Composable
+fun UnifiedMediaCard(
+    item: UnifiedMediaItem,
+    onClick: () -> Unit,
+    showProgress: Boolean = false,
+) {
+    Column(
+        modifier = Modifier
+            .width(130.dp)
+            .clickable(onClick = onClick),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(0.67f)
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = if (item.hasAudio && !item.hasText) Icons.Default.Headphones else Icons.Default.AutoStories,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                modifier = Modifier.size(40.dp),
+            )
+
+            if (item.coverUrl.isNotBlank()) {
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(item.coverUrl)
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = item.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+
+            // Format Badge top-right
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(6.dp)
+            ) {
+                Surface(
+                    color = when {
+                        item.isDualFormat -> MaterialTheme.colorScheme.secondary
+                        item.hasAudio -> MaterialTheme.colorScheme.tertiary
+                        else -> MaterialTheme.colorScheme.primary
+                    },
+                    shape = RoundedCornerShape(6.dp),
+                    tonalElevation = 4.dp,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                    ) {
+                        if (item.isDualFormat) {
+                            Icon(Icons.Default.Star, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondary, modifier = Modifier.size(10.dp))
+                            Spacer(Modifier.width(2.dp))
+                            Text("Text & Audio", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSecondary)
+                        } else if (item.hasAudio) {
+                            Icon(Icons.Default.Headphones, contentDescription = null, tint = MaterialTheme.colorScheme.onTertiary, modifier = Modifier.size(10.dp))
+                            Spacer(Modifier.width(2.dp))
+                            Text("Audio", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onTertiary)
+                        } else {
+                            Text("eBook", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimary)
+                        }
+                    }
+                }
+            }
+
+            // Gradient overlay at bottom
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(60.dp)
+                    .align(Alignment.BottomCenter)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f))
+                        )
+                    )
+            )
+        }
+
+        if (showProgress && (item.readProgressPercent != null && item.readProgressPercent > 0f)) {
+            LinearProgressIndicator(
+                progress = { item.readProgressPercent },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(3.dp)
+                    .clip(RoundedCornerShape(2.dp)),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.surfaceVariant,
+            )
+        }
+
+        Spacer(Modifier.height(6.dp))
+
         Text(
-            text = "${library.seriesCount} series",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            text = item.title,
+            style = MaterialTheme.typography.labelMedium,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            fontWeight = FontWeight.Medium,
         )
+
+        if (!item.author.isNullOrBlank()) {
+            Text(
+                text = item.author,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
 @Composable
 fun SeriesCard(
-    series: Series,
+    series: com.u1145h.books.domain.model.Series,
     coverUrl: String,
     onClick: () -> Unit,
     showProgress: Boolean = false,
@@ -360,48 +509,17 @@ fun SeriesCard(
                     modifier = Modifier.fillMaxSize(),
                 )
             }
-            // Gradient overlay at bottom
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(60.dp)
-                    .align(Alignment.BottomCenter)
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f))
-                        )
-                    )
-            )
-        }
-
-        if (showProgress && series.pages > 0) {
-            LinearProgressIndicator(
-                progress = { series.progressPercent },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(3.dp)
-                    .clip(RoundedCornerShape(2.dp)),
-                color = MaterialTheme.colorScheme.primary,
-                trackColor = MaterialTheme.colorScheme.surfaceVariant,
-            )
         }
 
         Spacer(Modifier.height(6.dp))
+
         Text(
             text = series.name,
-            style = MaterialTheme.typography.labelMedium,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
-            fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(horizontal = 2.dp),
         )
-        if (series.libraryName != null) {
-            Text(
-                text = series.libraryName,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
     }
 }

@@ -35,6 +35,7 @@ import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
 import androidx.compose.material.icons.automirrored.filled.NavigateNext
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.SwapHoriz
@@ -84,6 +85,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.u1145h.books.domain.model.Chapter
+import com.u1145h.books.feature.audio.AudioMiniPlayer
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -169,7 +171,7 @@ fun ReaderScreen(
             )
         }
 
-        // ── Controls overlay ─────────────────────────────────────────────────
+        // Controls overlay
         AnimatedVisibility(
             visible = state.showControls && !state.isLoading && state.error == null,
             enter = fadeIn(),
@@ -184,10 +186,17 @@ fun ReaderScreen(
                 onToggleChapterList = { viewModel.toggleChapterList() },
                 onToggleRtl = { viewModel.toggleRtl() },
                 onToggleWebtoon = { viewModel.toggleWebtoon() },
+                onToggleAudiobook = { viewModel.toggleCompanionAudiobook() },
             )
         }
 
-        // ── Chapter List Bottom Sheet ─────────────────────────────────────────
+        // MiniPlayer overlay if active in reader
+        AudioMiniPlayer(
+            playerManager = viewModel.audioPlayerManager,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
+
+        // Chapter List Bottom Sheet
         if (state.showChapterList) {
             ChapterListBottomSheet(
                 state = state,
@@ -196,7 +205,7 @@ fun ReaderScreen(
             )
         }
 
-        // ── Chapter Completion Confirmation Dialog ────────────────────────────
+        // Chapter Completion Confirmation Dialog
         if (state.showChapterCompletionDialog) {
             ChapterCompletionDialog(
                 state = state,
@@ -220,14 +229,12 @@ private fun PagerReader(
         pageCount = { totalPages },
     )
 
-    // Sync ViewModel page -> pager
     LaunchedEffect(state.currentPage) {
         if (state.currentPage in 0 until totalPages && pagerState.currentPage != state.currentPage) {
             pagerState.scrollToPage(state.currentPage)
         }
     }
 
-    // Sync pager swipe -> ViewModel
     LaunchedEffect(pagerState) {
         snapshotFlow { pagerState.currentPage }.collect { page ->
             if (page in 0 until totalPages && page != state.currentPage) {
@@ -266,7 +273,6 @@ private fun WebtoonReader(
         initialFirstVisibleItemIndex = state.currentPage.coerceIn(0, (state.totalPages - 1).coerceAtLeast(0)),
     )
 
-    // Sync user scroll -> ViewModel
     LaunchedEffect(listState) {
         snapshotFlow { listState.firstVisibleItemIndex }
             .collect { index ->
@@ -434,9 +440,10 @@ private fun ReaderControls(
     onToggleChapterList: () -> Unit,
     onToggleRtl: () -> Unit,
     onToggleWebtoon: () -> Unit,
+    onToggleAudiobook: () -> Unit,
 ) {
     Box(Modifier.fillMaxSize()) {
-        // ── Top bar ──────────────────────────────────────────────────────────
+        // Top bar
         Surface(
             color = Color.Black.copy(alpha = 0.85f),
             modifier = Modifier
@@ -464,6 +471,18 @@ private fun ReaderControls(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
+
+                // Companion Audiobook switch button
+                if (state.companionAudiobookId != null) {
+                    IconButton(onClick = onToggleAudiobook) {
+                        Icon(
+                            Icons.Default.Headphones,
+                            contentDescription = "Listen Audiobook",
+                            tint = if (state.isCompanionAudioPlaying) MaterialTheme.colorScheme.primary else Color.White,
+                        )
+                    }
+                }
+
                 IconButton(onClick = onToggleChapterList) {
                     Icon(
                         Icons.AutoMirrored.Filled.FormatListBulleted,
@@ -490,7 +509,7 @@ private fun ReaderControls(
             }
         }
 
-        // ── Bottom slider + Chapter controls ──────────────────────────────────
+        // Bottom slider + Chapter controls
         Surface(
             color = Color.Black.copy(alpha = 0.85f),
             modifier = Modifier
@@ -542,8 +561,7 @@ private fun ReaderControls(
                         value = state.currentPage.toFloat(),
                         onValueChange = { onPageChange(it.toInt()) },
                         valueRange = 0f..(state.totalPages - 1).toFloat(),
-                        steps = (state.totalPages - 2).coerceAtLeast(0),
-                        modifier = Modifier.fillMaxWidth(),
+                        steps = if (state.totalPages > 2) state.totalPages - 2 else 0,
                     )
                 }
             }
@@ -558,7 +576,7 @@ private fun ChapterListBottomSheet(
     onDismiss: () -> Unit,
     onSelectChapter: (Int) -> Unit,
 ) {
-    val sheetState = rememberModalBottomSheetState()
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -567,75 +585,50 @@ private fun ChapterListBottomSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 32.dp),
+                .padding(bottom = 32.dp)
         ) {
             Text(
-                text = "Chapters (${state.chapters.size})",
+                text = "Chapters",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
             )
             HorizontalDivider()
-
-            LazyColumn(
-                contentPadding = PaddingValues(vertical = 8.dp),
-            ) {
-                items(state.chapters, key = { it.id }) { chapter ->
+            LazyColumn {
+                items(state.chapters) { chapter ->
                     val isCurrent = chapter.id == state.chapterId
-                    ChapterListItem(
-                        chapter = chapter,
-                        isCurrent = isCurrent,
-                        onClick = { onSelectChapter(chapter.id) },
-                    )
+                    val title = chapter.title?.ifBlank { null } ?: "Chapter ${chapter.number}"
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelectChapter(chapter.id) }
+                            .background(
+                                if (isCurrent) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                else Color.Transparent
+                            )
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = title,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isCurrent) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (isCurrent) {
+                            Icon(
+                                Icons.Default.Check,
+                                contentDescription = "Current Chapter",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun ChapterListItem(
-    chapter: Chapter,
-    isCurrent: Boolean,
-    onClick: () -> Unit,
-) {
-    val title = chapter.title?.ifBlank { null } ?: "Chapter ${chapter.number}"
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .background(
-                if (isCurrent) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
-                else Color.Transparent
-            )
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
-                color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-            )
-            if (chapter.pages > 0) {
-                val progressText = if (chapter.pagesRead >= chapter.pages) "Completed"
-                else "${chapter.pagesRead}/${chapter.pages} pages"
-                Text(
-                    text = progressText,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-
-        if (isCurrent) {
-            Icon(
-                Icons.Default.Check,
-                contentDescription = "Current chapter",
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(20.dp),
-            )
         }
     }
 }

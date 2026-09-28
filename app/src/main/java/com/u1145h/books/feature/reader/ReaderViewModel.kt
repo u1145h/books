@@ -3,13 +3,17 @@ package com.u1145h.books.feature.reader
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.u1145h.books.data.remote.abs.dto.AbsLibraryItemDto
 import com.u1145h.books.data.remote.api.KavitaApiService
 import com.u1145h.books.data.remote.auth.SessionManager
 import com.u1145h.books.data.remote.dto.ProgressDto
+import com.u1145h.books.data.repository.AudiobookshelfRepository
 import com.u1145h.books.data.repository.KavitaRepository
 import com.u1145h.books.data.repository.LibraryRepository
 import com.u1145h.books.data.repository.SettingsRepository
+import com.u1145h.books.domain.manager.MediaMatchingManager
 import com.u1145h.books.domain.model.Chapter
+import com.u1145h.books.feature.audio.AudioPlayerManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -58,89 +62,186 @@ data class ReaderUiState(
     val nextChapter: Chapter? = null,
     val showChapterList: Boolean = false,
     val showChapterCompletionDialog: Boolean = false,
+    // Companion Audiobook
+    val companionAudiobookId: String? = null,
+    val companionAudiobook: AbsLibraryItemDto? = null,
+    val isCompanionAudioPlaying: Boolean = false,
 )
 
 @HiltViewModel
 class ReaderViewModel @Inject constructor(
     private val api: KavitaApiService,
     private val kavitaRepository: KavitaRepository,
+    private val absRepository: AudiobookshelfRepository,
     private val libraryRepository: LibraryRepository,
     private val settingsRepository: SettingsRepository,
+    private val mediaMatchingManager: MediaMatchingManager,
+    val audioPlayerManager: AudioPlayerManager,
     val sessionManager: SessionManager,
     val okHttpClient: OkHttpClient,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
-    private val _state = MutableStateFlow(ReaderUiState())
+    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private val navChapterId: Int = savedStateHandle["chapterId"] ?: 0
+    private val navSeriesId: Int = savedStateHandle["seriesId"] ?: 0
+
+    private val _state = MutableStateFlow(ReaderUiState(chapterId = navChapterId, seriesId = navSeriesId))
     val state: StateFlow<ReaderUiState> = _state.asStateFlow()
 
-    val serverUrl: String get() = settingsRepository.currentServerUrl
-
-    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var controlsJob: Job? = null
     private var progressDebounceJob: Job? = null
     private var pageFetchJob: Job? = null
+
+    // In-memory HTML cache for EPUB pages: pageIndex -> html
     private val epubCache = ConcurrentHashMap<Int, String>()
 
+    val serverUrl: String get() = settingsRepository.currentServerUrl
+
     init {
-        val chapterId = savedStateHandle.get<Int>("chapterId") ?: 0
-        val seriesId = savedStateHandle.get<Int>("seriesId") ?: 0
-        _state.update { it.copy(chapterId = chapterId, seriesId = seriesId) }
+        // Load default preferences
         viewModelScope.launch {
-            val appSettings = settingsRepository.settings.first()
+            val s = settingsRepository.settings.first()
             _state.update {
                 it.copy(
-                    isRtl = appSettings.readerRtl,
-                    isWebtoon = appSettings.readerWebtoon,
+                    isRtl = s.readerRtl,
+                    isWebtoon = s.readerWebtoon,
                 )
             }
         }
-        loadChapter(chapterId)
+
+        // Observe audio player state for companion
+        viewModelScope.launch {
+            audioPlayerManager.state.collect { audioState ->
+                _state.update {
+                    it.copy(isCompanionAudioPlaying = audioState.isActive && audioState.isPlaying)
+                }
+            }
+        }
+
+        checkCompanionAudiobook(navSeriesId)
+        loadChapter(navChapterId)
+    }
+
+    private fun checkCompanionAudiobook(seriesId: Int) {
+        if (seriesId <= 0) return
+        viewModelScope.launch {
+            val companionId = mediaMatchingManager.getCompanionAudiobookId(seriesId)
+            if (companionId != null) {
+                _state.update { it.copy(companionAudiobookId = companionId) }
+                absRepository.getItem(companionId).onSuccess { item ->
+                    _state.update { it.copy(companionAudiobook = item) }
+                }
+            } else if (settingsRepository.currentAbsServerUrl.isNotBlank()) {
+                // If not matched yet, check series name
+                libraryRepository.getSeries(seriesId).onSuccess { seriesDetail ->
+                    val normDetail = seriesDetail.name.lowercase().replace(Regex("[^a-z0-9]"), "")
+                    absRepository.getLibraries().onSuccess { libraries ->
+                        for (lib in libraries) {
+                            absRepository.getLibraryItems(lib.id, limit = 100).onSuccess { items ->
+                                val match = items.firstOrNull { itm ->
+                                    val itmTitle = (itm.media?.metadata?.title ?: "").lowercase().replace(Regex("[^a-z0-9]"), "")
+                                    itmTitle.isNotBlank() && (itmTitle == normDetail || itmTitle.contains(normDetail) || normDetail.contains(itmTitle))
+                                }
+                                if (match != null) {
+                                    mediaMatchingManager.setManualMatch(seriesId, match.id)
+                                    _state.update { it.copy(companionAudiobookId = match.id, companionAudiobook = match) }
+                                    return@onSuccess
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fun toggleCompanionAudiobook() {
+        val companionId = _state.value.companionAudiobookId ?: return
+        if (audioPlayerManager.state.value.isActive && audioPlayerManager.state.value.itemId == companionId) {
+            audioPlayerManager.togglePlayPause()
+        } else {
+            val companion = _state.value.companionAudiobook
+            val title = companion?.media?.metadata?.title ?: _state.value.title.ifBlank { "Audiobook" }
+            val author = companion?.media?.metadata?.authorName ?: ""
+            val coverUrl = absRepository.getCoverUrl(companionId)
+            audioPlayerManager.playAudiobook(
+                itemId = companionId,
+                title = title,
+                author = author,
+                coverUrl = coverUrl,
+                companionSeriesId = _state.value.seriesId,
+            )
+        }
     }
 
     fun loadChapter(chapterId: Int) {
+        saveProgressImmediately()
+        epubCache.clear()
+        pageFetchJob?.cancel()
+
         viewModelScope.launch {
-            _state.update { it.copy(isLoading = true, chapterId = chapterId, showChapterCompletionDialog = false) }
-            epubCache.clear()
-
-            val info = runCatching { api.getChapterInfo(chapterId).body() }.getOrNull()
-            val progress = runCatching { api.getProgress(chapterId).body() }.getOrNull()
-
-            val seriesId = info?.seriesId.takeIf { it != null && it > 0 } ?: _state.value.seriesId
-            var allChapters = _state.value.chapters
-
-            // Fetch volumes/chapters if empty or not yet loaded
-            if (allChapters.isEmpty() && seriesId > 0) {
-                val volumes = libraryRepository.getVolumes(seriesId).getOrDefault(emptyList())
-                allChapters = volumes.flatMap { it.chapters }
+            _state.update {
+                it.copy(
+                    isLoading = true,
+                    chapterId = chapterId,
+                    currentPage = 0,
+                    initialScrollY = 0,
+                    currentScrollId = null,
+                    currentPageHtml = null,
+                    showControls = true,
+                    error = null,
+                    showChapterCompletionDialog = false,
+                )
             }
 
+            val chapterInfoResult = kavitaRepository.getChapterInfo(chapterId)
+            val info = chapterInfoResult.getOrNull()
+
+            val sid = info?.seriesId ?: navSeriesId
+            val seriesResult = if (sid > 0) libraryRepository.getSeries(sid) else null
+            val allChapters = seriesResult?.getOrNull()?.allChapters ?: emptyList()
             val curIndex = allChapters.indexOfFirst { it.id == chapterId }
             val prev = if (curIndex > 0) allChapters[curIndex - 1] else null
             val next = if (curIndex in 0 until allChapters.size - 1) allChapters[curIndex + 1] else null
 
-            val rawFormat = info?.seriesFormat ?: 0
-            val isEpub = rawFormat == 3 || info?.fileName?.endsWith(".epub", ignoreCase = true) == true
-            val isPdf = rawFormat == 4 || info?.fileName?.endsWith(".pdf", ignoreCase = true) == true
-            val format = when {
-                isEpub -> ReaderFormat.EPUB
-                isPdf -> ReaderFormat.PDF
+            var pages = info?.pages ?: 0
+            if (pages <= 0) {
+                val foundCh = allChapters.firstOrNull { it.id == chapterId }
+                if (foundCh != null && foundCh.pages > 0) {
+                    pages = foundCh.pages
+                }
+            }
+
+            val progressResult = kavitaRepository.getProgress(chapterId)
+            val savedProgress = progressResult.getOrNull()
+            val savedPage = savedProgress?.pageNum ?: 0
+            val savedScrollId = savedProgress?.bookScrollId
+
+            val format = when (info?.seriesFormat) {
+                1 -> ReaderFormat.EPUB
+                2 -> ReaderFormat.PDF
                 else -> ReaderFormat.IMAGE
             }
 
-            val totalPages = info?.pages ?: 0
-            val savedPage = progress?.pageNum ?: 0
-            val initialPage = if (totalPages > 0 && savedPage >= totalPages) 0 else savedPage.coerceIn(0, (totalPages - 1).coerceAtLeast(0))
-            val savedScrollId = progress?.bookScrollId
-            val initialScroll = savedScrollId?.removePrefix("scroll:")?.toIntOrNull() ?: 0
+            val initialPage = when {
+                pages > 0 && savedPage >= pages -> 0
+                pages > 0 -> savedPage.coerceIn(0, pages - 1)
+                else -> 0
+            }
+
+            val initialScroll = savedScrollId
+                ?.removePrefix("scroll:")
+                ?.toIntOrNull()
+                ?: 0
 
             _state.update {
                 it.copy(
                     isLoading = false,
-                    chapterId = chapterId,
-                    seriesId = seriesId,
+                    seriesId = sid,
                     format = format,
-                    totalPages = totalPages,
+                    totalPages = pages,
                     currentPage = initialPage,
                     initialScrollY = initialScroll,
                     currentScrollId = savedScrollId,
@@ -369,7 +470,6 @@ class ReaderViewModel @Inject constructor(
         saveProgressImmediately()
     }
 
-    /** Build the URL for a given page image. */
     fun pageImageUrl(page: Int): String {
         val apiKey = sessionManager.apiKey
         val authSuffix = if (!apiKey.isNullOrBlank()) "&apiKey=$apiKey" else ""

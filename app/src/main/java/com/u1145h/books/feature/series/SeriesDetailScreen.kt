@@ -1,6 +1,7 @@
 package com.u1145h.books.feature.series
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,17 +22,21 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -57,6 +62,7 @@ import coil.compose.AsyncImage
 import com.u1145h.books.domain.model.Chapter
 import com.u1145h.books.domain.model.SeriesDetail
 import com.u1145h.books.domain.model.Volume
+import com.u1145h.books.feature.audio.AudioMiniPlayer
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -82,6 +88,9 @@ fun SeriesDetailScreen(
                 ),
             )
         },
+        bottomBar = {
+            AudioMiniPlayer(playerManager = viewModel.audioPlayerManager)
+        }
     ) { padding ->
         when {
             state.isLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -92,11 +101,15 @@ fun SeriesDetailScreen(
                 coverUrl = viewModel.coverUrlBuilder.series(state.series!!.id),
                 downloadedChapterIds = state.downloadedChapterIds,
                 downloadingChapterIds = state.downloadingChapterIds,
+                hasCompanionAudiobook = state.companionAudiobookId != null,
                 onChapterClick = onChapterClick,
                 onDownloadChapter = { viewModel.downloadChapter(it) },
                 onRemoveDownload = { viewModel.removeChapterDownload(it) },
                 onContinueClick = {
                     viewModel.continueChapter()?.let { onChapterClick(it.id) }
+                },
+                onPlayAudiobook = {
+                    viewModel.playCompanionAudiobook()
                 },
                 modifier = Modifier.padding(padding),
             )
@@ -114,17 +127,19 @@ private fun SeriesContent(
     coverUrl: String,
     downloadedChapterIds: Set<Int>,
     downloadingChapterIds: Set<Int>,
+    hasCompanionAudiobook: Boolean,
     onChapterClick: (Int) -> Unit,
     onDownloadChapter: (Chapter) -> Unit,
     onRemoveDownload: (Int) -> Unit,
     onContinueClick: () -> Unit,
+    onPlayAudiobook: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var summaryExpanded by rememberSaveable { mutableStateOf(false) }
 
     LazyColumn(modifier = modifier.fillMaxSize()) {
 
-        // ── Hero cover ───────────────────────────────────────────────────────
+        // Hero cover
         item {
             Box(
                 modifier = Modifier
@@ -137,7 +152,7 @@ private fun SeriesContent(
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
                 )
-                // scrim overlay bottom
+                // Scrim overlay bottom
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -145,28 +160,73 @@ private fun SeriesContent(
                         .align(Alignment.BottomCenter)
                         .background(
                             Brush.verticalGradient(
-                                listOf(Color.Transparent, MaterialTheme.colorScheme.background)
+                                colors = listOf(Color.Transparent, MaterialTheme.colorScheme.background),
                             )
                         )
                 )
             }
         }
 
-        // ── Title / Meta ─────────────────────────────────────────────────────
+        // Series info & Dual Read/Listen actions
         item {
-            Column(Modifier.padding(horizontal = 16.dp)) {
+            Column(modifier = Modifier.padding(horizontal = 16.dp)) {
                 Text(
-                    series.name,
+                    text = series.name,
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
                 )
-                if (!series.libraryName.isNullOrBlank()) {
-                    Text(
-                        series.libraryName,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                Spacer(Modifier.height(4.dp))
+
+                // Format Badges
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (hasCompanionAudiobook) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.tertiaryContainer,
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            ) {
+                                Icon(
+                                    Icons.Default.Headphones,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                    modifier = Modifier.size(14.dp),
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Text(
+                                    "Audiobook Available",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                )
+                            }
+                        }
+                    }
+
+                    val formatName = when (series.format) {
+                        1 -> "EPUB"
+                        2 -> "PDF"
+                        else -> "Image / Manga"
+                    }
+                    val meta = listOfNotNull(
+                        formatName,
+                        "${series.pages} pages".takeIf { series.pages > 0 },
+                    ).joinToString(" • ")
+
+                    if (meta.isNotBlank()) {
+                        Text(
+                            text = meta,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
+
                 Spacer(Modifier.height(8.dp))
 
                 // Progress bar
@@ -188,15 +248,32 @@ private fun SeriesContent(
                     Spacer(Modifier.height(8.dp))
                 }
 
-                // Continue button
-                Button(
-                    onClick = onContinueClick,
+                // Action Buttons: Read eBook & Listen Audiobook
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(if (series.pagesRead == 0) "Start Reading" else "Continue Reading")
+                    Button(
+                        onClick = onContinueClick,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Icon(Icons.Default.AutoStories, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(if (series.pagesRead == 0) "Read eBook" else "Continue Reading")
+                    }
+
+                    if (hasCompanionAudiobook) {
+                        FilledTonalButton(
+                            onClick = onPlayAudiobook,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                        ) {
+                            Icon(Icons.Default.Headphones, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Listen Audio")
+                        }
+                    }
                 }
 
                 Spacer(Modifier.height(16.dp))
@@ -243,7 +320,7 @@ private fun SeriesContent(
             }
         }
 
-        // ── Volumes / Chapters ───────────────────────────────────────────────
+        // Volumes / Chapters
         items(series.volumes) { volume ->
             VolumeRow(
                 volume = volume,
